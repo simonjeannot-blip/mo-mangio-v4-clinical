@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Toaster, toast } from 'sonner';
-import { X, History, CheckCircle, ShoppingCart, ChevronUp, Printer, Save } from 'lucide-react';
+import { X, History, CheckCircle, ShoppingCart, ChevronUp, Printer, Save, Utensils, ShoppingBag } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 // --- 1. SOVEREIGN CONFIGURATION ---
@@ -84,7 +84,9 @@ export default function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [splitPay, setSplitPay] = useState({ card: 0, cash: 0, atoa: 0, tips: 0 });
-  const [orderType] = useState<'dine-in'|'takeaway'>('dine-in');
+  
+  // THEATRE: Toggle for VAT Context
+  const [orderType, setOrderType] = useState<'dine-in'|'takeaway'>('dine-in');
 
   useEffect(() => {
     const syncV4 = async () => {
@@ -114,11 +116,14 @@ export default function App() {
   const currentCart = currentTable.orders;
   const categories = Array.from(new Set(menu.map(m => m.category)));
 
+  // VAT THEATRE LOGIC
   const totals = useMemo(() => {
     let gross = 0, vat_amount = 0;
     currentCart.forEach(item => {
       const lineTotal = item.price * (item.qty || 1);
       gross += lineTotal;
+      
+      // VAT Rule: Takeaway cold food is zero-rated. Hot food is always taxable.
       const isTaxable = item.profile === 'hot_food' || (item.profile === 'cold_food' && orderType === 'dine-in');
       if (isTaxable) vat_amount += (lineTotal - (lineTotal / 1.2));
     });
@@ -128,7 +133,8 @@ export default function App() {
   const triggerPrint = () => {
     const receiptContent = `
 MO' MANGIO!
-T${activeTable} | ${new Date().toLocaleTimeString()}
+T${activeTable} | ${orderType.toUpperCase()}
+${new Date().toLocaleTimeString()}
 --------------------------------
 ${currentCart.map(i => `${i.qty}x ${i.name.slice(0,18).padEnd(18)} £${(i.price * (i.qty || 1)).toFixed(2)}`).join('\n')}
 --------------------------------
@@ -141,22 +147,6 @@ GRAZIE MILLE!
     const scheme = `starpassprnt://v1/print/silent?size=3&data=${encodeURIComponent(receiptContent)}`;
     window.location.href = scheme;
     toast.success("THERMAL COMMAND DISPATCHED");
-  };
-
-  const triggerAtoa = async () => {
-    const amount = totals.gross;
-    if (amount <= 0) return toast.error("CANNOT SETTLE ZERO BALANCE");
-    toast.loading("SECURING ATOA VAULT...");
-    const { error: vaultError } = await supabase
-      .from('atoa_payments')
-      .insert({ transaction_id: currentTable.transaction_id, amount: amount, status: 'PENDING' });
-    if (vaultError) return toast.error("VAULT LOCK FAILED");
-    toast.dismiss();
-    const sandboxSim = confirm(`ATOA HANDSHAKE: Pay £${amount.toFixed(2)}?\nRef: ${currentTable.transaction_id}`);
-    if (sandboxSim) {
-      setSplitPay({ ...splitPay, atoa: amount });
-      toast.success("ATOA: PAYMENT COMPLETED");
-    }
   };
 
   const addToCart = (item: MenuItem) => {
@@ -187,7 +177,8 @@ GRAZIE MILLE!
         items: currentCart, 
         split: splitPay, 
         table: activeTable, 
-        transaction_id: currentTable.transaction_id 
+        transaction_id: currentTable.transaction_id,
+        order_type: orderType
       }
     }]);
 
@@ -217,6 +208,16 @@ GRAZIE MILLE!
           {TABLES.map(t => (
             <button key={t} onClick={() => setActiveTable(t)} style={{ height: '44px', minWidth: '55px', border: `1px solid ${activeTable === t ? DOJO_GREEN : '#222'}`, color: activeTable === t ? DOJO_GREEN : '#666', background: activeTable === t ? 'rgba(0,204,102,0.1)' : 'transparent', fontWeight: '900' }}>T{t}</button>
           ))}
+          
+          {/* THEATRE: Order Type Toggle */}
+          <button 
+            onClick={() => setOrderType(prev => prev === 'dine-in' ? 'takeaway' : 'dine-in')}
+            style={{ minWidth: '100px', border: `1px solid ${DOJO_GREEN}`, color: DOJO_GREEN, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '10px' }}
+          >
+            {orderType === 'dine-in' ? <Utensils size={14}/> : <ShoppingBag size={14}/>}
+            {orderType.toUpperCase()}
+          </button>
+
           <button onClick={async () => {
             const { data } = await supabase.from('financial_ledger').select('*').order('created_at', { ascending: false }).limit(15);
             setHistory(data || []);
@@ -239,13 +240,13 @@ GRAZIE MILLE!
         ))}
       </main>
 
-      {/* HARDENED FOOTER WITH PRINT & SAVE */}
+      {/* FOOTER: THEATRE + CONTROLS */}
       <footer style={{ background: '#000', borderTop: `2px solid ${DOJO_GREEN}`, padding: '12px 16px', display: 'flex', gap: '12px', alignItems: 'center', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
         <div onClick={() => setShowCart(true)} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexGrow: 1 }}>
           <ShoppingCart size={22} color={DOJO_GREEN} />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <span style={{ fontSize: '18px', fontWeight: '900' }}>£{totals.gross.toFixed(2)}</span>
-            <span style={{ fontSize: '9px', opacity: 0.5 }}>T{activeTable} CART <ChevronUp size={8} style={{ display: 'inline' }} /></span>
+            <span style={{ fontSize: '9px', color: DOJO_GREEN, opacity: 0.8 }}>VAT: £{totals.vat_amount.toFixed(2)}</span>
           </div>
         </div>
         
@@ -257,13 +258,13 @@ GRAZIE MILLE!
           <Printer size={20} />
         </button>
         
-        <button onClick={() => setShowSettle(true)} style={{ background: DOJO_GREEN, color: '#000', padding: '14px 28px', fontWeight: '900', fontSize: '14px', border: 'none', borderRadius: '4px' }}>SETTLE</button>
+        <button onClick={() => setShowSettle(true)} style={{ background: DOJO_GREEN, color: '#000', padding: '12px 20px', fontWeight: '900', fontSize: '14px', border: 'none', borderRadius: '4px' }}>SETTLE</button>
       </footer>
 
       {showCart && (
         <div style={{ position: 'fixed', inset: 0, background: CHARCOAL, zIndex: 100, display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top)' }}>
-          <header style={{ padding: '20px', background: '#000', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontWeight: '900', color: DOJO_GREEN }}>T{activeTable} LEDGER</span>
+          <header style={{ padding: '20px', background: '#000', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontWeight: '900', color: DOJO_GREEN }}>T{activeTable} CART ({orderType.toUpperCase()})</span>
             <X onClick={() => setShowCart(false)} />
           </header>
           <div style={{ flexGrow: 1, padding: '16px', overflowY: 'auto' }}>
@@ -273,6 +274,13 @@ GRAZIE MILLE!
                 <span>£{(i.price * (i.qty || 1)).toFixed(2)}</span>
               </div>
             ))}
+            
+            {/* THEATRE: Summary in Cart */}
+            <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '16px', textAlign: 'right' }}>
+               <div style={{ fontSize: '12px', opacity: 0.5 }}>TAXABLE: {orderType === 'dine-in' ? 'FULL' : 'HOT ONLY'}</div>
+               <div style={{ fontSize: '14px', marginBottom: '4px' }}>VAT INC: £{totals.vat_amount.toFixed(2)}</div>
+               <div style={{ fontSize: '24px', fontWeight: '900', color: DOJO_GREEN }}>TOTAL: £{totals.gross.toFixed(2)}</div>
+            </div>
           </div>
           <div style={{ padding: '16px', borderTop: '1px solid #333', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
             <button onClick={saveToTable} style={{ background: '#222', color: DOJO_GREEN, padding: '18px', fontWeight: 'bold', border: `1px solid ${DOJO_GREEN}` }}>SAVE TAB</button>
@@ -284,15 +292,15 @@ GRAZIE MILLE!
       {showSettle && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.97)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: '20px' }}>
           <div style={{ background: '#111', width: '100%', maxWidth: '400px', border: `1px solid ${DOJO_GREEN}`, padding: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}><span style={{ fontWeight: '900' }}>T{activeTable} SETTLEMENT</span><X onClick={() => setShowSettle(false)} /></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}><span style={{ fontWeight: '900' }}>T{activeTable} SETTLEMENT ({orderType.toUpperCase()})</span><X onClick={() => setShowSettle(false)} /></div>
             <div style={{ background: '#000', padding: '20px', textAlign: 'center', marginBottom: '20px' }}>
               <div style={{ fontSize: '36px', color: DOJO_GREEN, fontWeight: '900' }}>£{(totals.gross - (splitPay.card + splitPay.cash + splitPay.atoa)).toFixed(2)}</div>
+              <div style={{ fontSize: '10px', opacity: 0.5 }}>INC £{totals.vat_amount.toFixed(2)} VAT</div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <PaymentLine label="CASH" val={splitPay.cash} set={v => setSplitPay({...splitPay, cash: v})} />
               <PaymentLine label="CARD" val={splitPay.card} set={v => setSplitPay({...splitPay, card: v})} />
               <PaymentLine label="TIPS" val={splitPay.tips} set={v => setSplitPay({...splitPay, tips: v})} />
-              <button onClick={triggerAtoa} style={{ background: '#000', border: `1px solid ${DOJO_GREEN}`, color: DOJO_GREEN, padding: '15px', fontWeight: '900' }}>ATOA PAY</button>
             </div>
             <button onClick={finalize} style={{ width: '100%', background: DOJO_GREEN, color: '#000', padding: '18px', marginTop: '20px', fontWeight: '900' }}>FINALIZE SALE</button>
           </div>
