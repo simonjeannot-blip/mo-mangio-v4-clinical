@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Toaster, toast } from 'sonner';
-import { X, History, CheckCircle, ShoppingCart, ChevronUp, Printer, Save, Utensils, ShoppingBag } from 'lucide-react';
+import { X, History, CheckCircle, ShoppingCart, Printer, Save, Utensils, ShoppingBag } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 // --- 1. SOVEREIGN CONFIGURATION ---
@@ -209,7 +209,6 @@ GRAZIE MILLE!
             <button key={t} onClick={() => setActiveTable(t)} style={{ height: '44px', minWidth: '55px', border: `1px solid ${activeTable === t ? DOJO_GREEN : '#222'}`, color: activeTable === t ? DOJO_GREEN : '#666', background: activeTable === t ? 'rgba(0,204,102,0.1)' : 'transparent', fontWeight: '900' }}>T{t}</button>
           ))}
           
-          {/* THEATRE: Order Type Toggle */}
           <button 
             onClick={() => setOrderType(prev => prev === 'dine-in' ? 'takeaway' : 'dine-in')}
             style={{ minWidth: '100px', border: `1px solid ${DOJO_GREEN}`, color: DOJO_GREEN, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '10px' }}
@@ -240,7 +239,6 @@ GRAZIE MILLE!
         ))}
       </main>
 
-      {/* FOOTER: THEATRE + CONTROLS */}
       <footer style={{ background: '#000', borderTop: `2px solid ${DOJO_GREEN}`, padding: '12px 16px', display: 'flex', gap: '12px', alignItems: 'center', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
         <div onClick={() => setShowCart(true)} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexGrow: 1 }}>
           <ShoppingCart size={22} color={DOJO_GREEN} />
@@ -275,7 +273,6 @@ GRAZIE MILLE!
               </div>
             ))}
             
-            {/* THEATRE: Summary in Cart */}
             <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '16px', textAlign: 'right' }}>
                <div style={{ fontSize: '12px', opacity: 0.5 }}>TAXABLE: {orderType === 'dine-in' ? 'FULL' : 'HOT ONLY'}</div>
                <div style={{ fontSize: '14px', marginBottom: '4px' }}>VAT INC: £{totals.vat_amount.toFixed(2)}</div>
