@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Toaster, toast } from 'sonner';
-import { Printer, Trash2, Settings, X, Save, History, CheckCircle, ShoppingCart, ChevronUp, CreditCard } from 'lucide-react';
+import { X, History, CheckCircle, ShoppingCart, ChevronUp } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
+// --- 1. SOVEREIGN CONFIGURATION ---
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL || "", 
   import.meta.env.VITE_SUPABASE_ANON_KEY || ""
@@ -12,6 +13,7 @@ const TABLES = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"];
 const DOJO_GREEN = "#00CC66";
 const CHARCOAL = "#1A1A1A";
 
+// --- 2. HARDENED TYPES ---
 interface MenuItem {
   id: string;
   name: string;
