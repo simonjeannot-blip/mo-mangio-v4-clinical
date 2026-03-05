@@ -39,7 +39,7 @@ const INITIAL_MENU: MenuItem[] = [
   { id: 's4', name: 'DA NORD A SUD', price: 5.45, profile: 'cold_food', category: 'STARTERS' },
   { id: 's5', name: 'ROCKET SALAD (VG)', price: 6.50, profile: 'cold_food', category: 'STARTERS' },
   { id: 's6', name: 'BURRATA (V)', price: 8.50, profile: 'cold_food', category: 'STARTERS' },
-  { id: 'p1', name: 'RAGÚ NAPOLETANO', price: 12.50, profile: 'hot_food', category: 'PASTA' },
+  { id: 'p1', name: 'RAGÚ NAPO Napoletano', price: 12.50, profile: 'hot_food', category: 'PASTA' },
   { id: 'p2', name: 'PICI CARBONARA', price: 12.50, profile: 'hot_food', category: 'PASTA' },
   { id: 'p3', name: "PICI AMATRICIANA", price: 12.50, profile: 'hot_food', category: 'PASTA' },
   { id: 'p4', name: 'GRICIA', price: 12.50, profile: 'hot_food', category: 'PASTA' },
@@ -84,8 +84,6 @@ export default function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [splitPay, setSplitPay] = useState({ card: 0, cash: 0, atoa: 0, tips: 0 });
-  
-  // THEATRE: Toggle for VAT Context
   const [orderType, setOrderType] = useState<'dine-in'|'takeaway'>('dine-in');
 
   useEffect(() => {
@@ -116,14 +114,11 @@ export default function App() {
   const currentCart = currentTable.orders;
   const categories = Array.from(new Set(menu.map(m => m.category)));
 
-  // VAT THEATRE LOGIC
   const totals = useMemo(() => {
     let gross = 0, vat_amount = 0;
     currentCart.forEach(item => {
       const lineTotal = item.price * (item.qty || 1);
       gross += lineTotal;
-      
-      // VAT Rule: Takeaway cold food is zero-rated. Hot food is always taxable.
       const isTaxable = item.profile === 'hot_food' || (item.profile === 'cold_food' && orderType === 'dine-in');
       if (isTaxable) vat_amount += (lineTotal - (lineTotal / 1.2));
     });
@@ -169,16 +164,19 @@ GRAZIE MILLE!
   const finalize = async () => {
     const { gross, vat_amount } = totals;
     const payment_method = splitPay.cash > 0 ? 'cash' : (splitPay.atoa > 0 ? 'atoa' : 'card');
+    
+    // BYPASSING DB DIGEST: Direct write to hardened columns
     const { error } = await supabase.from('financial_ledger').insert([{ 
       gross_amount: gross,
       vat_amount: vat_amount,
       payment_method: payment_method,
+      table_number: activeTable,
+      order_type: orderType,
       metadata: { 
         items: currentCart, 
         split: splitPay, 
-        table: activeTable, 
         transaction_id: currentTable.transaction_id,
-        order_type: orderType
+        app_version: 'v4.2-clinical'
       }
     }]);
 
@@ -194,7 +192,7 @@ GRAZIE MILLE!
       triggerPrint();
       toast.success("SALE HARDENED: GOLD SECURED");
     } else {
-      console.error("Schema Rift Details:", error);
+      console.error("Refinery Blockade:", error);
       toast.error(`VAULT WRITE FAILED: ${error.message}`);
     }
   };
@@ -311,7 +309,7 @@ GRAZIE MILLE!
             <div style={{ maxHeight: '60dvh', overflowY: 'auto' }}>
               {history.map(tx => (
                 <div key={tx.id} style={{ padding: '12px', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>T{tx.metadata?.table || '?'} - £{tx.gross_amount?.toFixed(2)}</span>
+                  <span>T{tx.table_number || '?'} - £{tx.gross_amount?.toFixed(2)}</span>
                   <span style={{ opacity: 0.3 }}>{tx.created_at ? new Date(tx.created_at).toLocaleTimeString() : ''}</span>
                 </div>
               ))}
