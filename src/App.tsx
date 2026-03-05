@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Toaster, toast } from 'sonner';
-import { X, History, CheckCircle, ShoppingCart, ChevronUp } from 'lucide-react';
+import { X, History, CheckCircle, ShoppingCart, ChevronUp, Printer, Save } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 // --- 1. SOVEREIGN CONFIGURATION ---
@@ -183,17 +183,28 @@ GRAZIE MILLE!
       gross_amount: gross,
       vat_amount: vat_amount,
       payment_method: payment_method,
-      metadata: { items: currentCart, split: splitPay, table: activeTable, transaction_id: currentTable.transaction_id }
+      metadata: { 
+        items: currentCart, 
+        split: splitPay, 
+        table: activeTable, 
+        transaction_id: currentTable.transaction_id 
+      }
     }]);
+
     if (!error) {
-      await supabase.from('active_tables').update({ orders: [], transaction_id: crypto.randomUUID() }).eq('table_number', activeTable);
+      await supabase.from('active_tables').update({ 
+        orders: [], 
+        transaction_id: crypto.randomUUID() 
+      }).eq('table_number', activeTable);
+      
       setV4Tables(prev => prev.map(t => t.id === activeTable ? { ...t, orders: [], transaction_id: crypto.randomUUID() } : t));
       setSplitPay({ card: 0, cash: 0, atoa: 0, tips: 0 });
       setShowSettle(false);
       triggerPrint();
       toast.success("SALE HARDENED: GOLD SECURED");
     } else {
-      toast.error("VAULT WRITE FAILED: SCHEMA RIFT");
+      console.error("Schema Rift Details:", error);
+      toast.error(`VAULT WRITE FAILED: ${error.message}`);
     }
   };
 
@@ -228,15 +239,25 @@ GRAZIE MILLE!
         ))}
       </main>
 
-      <footer style={{ background: '#000', borderTop: `2px solid ${DOJO_GREEN}`, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
-        <div onClick={() => setShowCart(true)} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* HARDENED FOOTER WITH PRINT & SAVE */}
+      <footer style={{ background: '#000', borderTop: `2px solid ${DOJO_GREEN}`, padding: '12px 16px', display: 'flex', gap: '12px', alignItems: 'center', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
+        <div onClick={() => setShowCart(true)} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexGrow: 1 }}>
           <ShoppingCart size={22} color={DOJO_GREEN} />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <span style={{ fontSize: '18px', fontWeight: '900' }}>£{totals.gross.toFixed(2)}</span>
             <span style={{ fontSize: '9px', opacity: 0.5 }}>T{activeTable} CART <ChevronUp size={8} style={{ display: 'inline' }} /></span>
           </div>
         </div>
-        <button onClick={() => setShowSettle(true)} style={{ background: DOJO_GREEN, color: '#000', padding: '14px 28px', fontWeight: '900', fontSize: '14px', border: 'none' }}>SETTLE</button>
+        
+        <button onClick={saveToTable} style={{ background: '#111', border: `1px solid ${DOJO_GREEN}`, color: DOJO_GREEN, padding: '10px', borderRadius: '4px' }}>
+          <Save size={20} />
+        </button>
+
+        <button onClick={triggerPrint} style={{ background: '#111', border: `1px solid ${DOJO_GREEN}`, color: DOJO_GREEN, padding: '10px', borderRadius: '4px' }}>
+          <Printer size={20} />
+        </button>
+        
+        <button onClick={() => setShowSettle(true)} style={{ background: DOJO_GREEN, color: '#000', padding: '14px 28px', fontWeight: '900', fontSize: '14px', border: 'none', borderRadius: '4px' }}>SETTLE</button>
       </footer>
 
       {showCart && (
