@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Toaster, toast } from 'sonner';
-import { Printer, Trash2, Settings, X, Save, History, CheckCircle, RotateCcw, Copy, CreditCard } from 'lucide-react';
+import { Printer, Trash2, Settings, X, Save, History, CheckCircle, ShoppingCart, ChevronUp, CreditCard } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 // --- 1. SOVEREIGN CONFIGURATION ---
@@ -73,28 +73,23 @@ const INITIAL_MENU: MenuItem[] = [
 export default function App() {
   const [activeTable, setActiveTable] = useState("01");
   const [v4Tables, setV4Tables] = useState<TableState[]>([]);
-  const [menu, setMenu] = useState<MenuItem[]>(() => {
+  const [menu] = useState<MenuItem[]>(() => {
     const saved = localStorage.getItem('mm_menu_v11');
     return saved ? JSON.parse(saved) : INITIAL_MENU;
   });
   
   const [activeCat, setActiveCat] = useState("PASTA");
   const [showSettle, setShowSettle] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
+  const [showCart, setShowCart] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [splitPay, setSplitPay] = useState({ card: 0, cash: 0, atoa: 0, tips: 0 });
-  const [orderType, setOrderType] = useState<'dine-in'|'takeaway'>('dine-in');
+  const [orderType] = useState<'dine-in'|'takeaway'>('dine-in');
 
-  // --- 3. V4 STATE SYNC ENGINE ---
   useEffect(() => {
     const syncV4 = async () => {
-      const { data, error } = await supabase
-        .from('active_tables')
-        .select('*');
-      
+      const { data } = await supabase.from('active_tables').select('*');
       if (data) {
-        // Map legacy table names to the V4 state
         const synced = TABLES.map(tNum => {
           const dbRow = data.find(r => r.table_number === tNum);
           return {
@@ -108,6 +103,11 @@ export default function App() {
       }
     };
     syncV4();
+
+    const channel = supabase.channel('table-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'active_tables' }, syncV4)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   const currentTable = v4Tables.find(t => t.id === activeTable) || { id: activeTable, orders: [], transaction_id: '', table_status: 'open' };
@@ -115,228 +115,188 @@ export default function App() {
   const categories = Array.from(new Set(menu.map(m => m.category)));
 
   const totals = useMemo(() => {
-    let gross = 0, vat20 = 0;
+    let gross = 0, vat_amount = 0;
     currentCart.forEach(item => {
       const lineTotal = item.price * (item.qty || 1);
       gross += lineTotal;
-      const isTaxableAt20 = item.profile === 'hot_food' || (item.profile === 'cold_food' && orderType === 'dine-in');
-      if (isTaxableAt20) vat20 += (lineTotal - (lineTotal / 1.2));
+      const isTaxable = item.profile === 'hot_food' || (item.profile === 'cold_food' && orderType === 'dine-in');
+      if (isTaxable) vat_amount += (lineTotal - (lineTotal / 1.2));
     });
-    return { gross, vat20, net: gross - vat20 };
+    return { gross, vat_amount };
   }, [currentCart, orderType]);
 
-  // --- 4. ATOA SANDBOX BRIDGE ---
+  const triggerPrint = () => {
+    const receiptContent = `
+MO' MANGIO!
+T${activeTable} | ${new Date().toLocaleTimeString()}
+--------------------------------
+${currentCart.map(i => `${i.qty}x ${i.name.slice(0,18).padEnd(18)} £${(i.price * (i.qty || 1)).toFixed(2)}`).join('\n')}
+--------------------------------
+TOTAL: £${totals.gross.toFixed(2)}
+VAT (Inc): £${totals.vat_amount.toFixed(2)}
+TIPS: £${splitPay.tips.toFixed(2)}
+--------------------------------
+GRAZIE MILLE!
+    `;
+    const scheme = `starpassprnt://v1/print/silent?size=3&data=${encodeURIComponent(receiptContent)}`;
+    window.location.href = scheme;
+    toast.success("THERMAL COMMAND DISPATCHED");
+  };
+
   const triggerAtoa = async () => {
     const amount = totals.gross;
     if (amount <= 0) return toast.error("CANNOT SETTLE ZERO BALANCE");
-
     toast.loading("SECURING ATOA VAULT...");
-
-    // 1. Log Intent in atoa_payments
     const { error: vaultError } = await supabase
       .from('atoa_payments')
-      .insert({
-        transaction_id: currentTable.transaction_id,
-        amount: amount,
-        status: 'PENDING'
-      });
-
+      .insert({ transaction_id: currentTable.transaction_id, amount: amount, status: 'PENDING' });
     if (vaultError) return toast.error("VAULT LOCK FAILED");
-
-    // 2. Open Atoa Sandbox (Simulated for this build)
     toast.dismiss();
-    const sandboxSim = confirm(`ATOA SANDBOX: Pay £${amount.toFixed(2)}?\nRef: ${currentTable.transaction_id}`);
-    
+    const sandboxSim = confirm(`ATOA HANDSHAKE: Pay £${amount.toFixed(2)}?\nRef: ${currentTable.transaction_id}`);
     if (sandboxSim) {
       setSplitPay({ ...splitPay, atoa: amount });
-      toast.success("SANDBOX: PAYMENT COMPLETED");
+      toast.success("ATOA: PAYMENT COMPLETED");
     }
   };
 
   const addToCart = (item: MenuItem) => {
     const price = item.id === 'open' ? parseFloat(prompt("Enter Open Price:") || "0") : item.price;
     const existing = currentCart.find(i => i.id === item.id && i.price === price && !i.sent);
-    
     const newOrders = existing 
       ? currentCart.map(i => (i.id === item.id && i.price === price && !i.sent) ? { ...i, qty: (i.qty || 1) + 1 } : i)
       : [...currentCart, { ...item, qty: 1, price, orderId: crypto.randomUUID(), sent: false }];
-    
     setV4Tables(prev => prev.map(t => t.id === activeTable ? { ...t, orders: newOrders } : t));
   };
 
   const saveToTable = async () => {
     const hardenedOrders = currentCart.map(item => ({ ...item, sent: true }));
-    
-    const { error } = await supabase
-      .from('active_tables')
-      .upsert({ 
-        table_number: activeTable, 
-        orders: hardenedOrders,
-        transaction_id: currentTable.transaction_id,
-        table_status: 'open'
-      }, { onConflict: 'table_number' });
-
-    if (!error) {
-      setV4Tables(prev => prev.map(t => t.id === activeTable ? { ...t, orders: hardenedOrders } : t));
-      toast.success(`T${activeTable} HARDENED TO LEDGER`);
-    } else {
-      toast.error("LEDGER SYNC FAILED");
-    }
+    const { error } = await supabase.from('active_tables').upsert({ 
+      table_number: activeTable, orders: hardenedOrders, transaction_id: currentTable.transaction_id, table_status: 'open' 
+    });
+    if (!error) toast.success(`T${activeTable} HARDENED`);
   };
 
   const finalize = async () => {
-    const totalPaid = splitPay.card + splitPay.cash + splitPay.atoa;
-    if (totalPaid < totals.gross && totalPaid > 0) {
-      if (!confirm("Payment is partial. Proceed with closing?")) return;
-    }
-
-    const tx = { 
-      id: crypto.randomUUID(), 
-      table_id: activeTable, 
-      items: currentCart, 
-      gross_sales: totals.gross,
-      vat_total: totals.vat20, 
-      tips_total: splitPay.tips, 
-      payment_split: splitPay,
-      created_at: new Date().toISOString()
-    };
-
-    const { error } = await supabase.from('sales_ledger').insert([tx]);
-    
+    const { gross, vat_amount } = totals;
+    const payment_method = splitPay.cash > 0 ? 'cash' : (splitPay.atoa > 0 ? 'atoa' : 'card');
+    const { error } = await supabase.from('financial_ledger').insert([{ 
+      gross_amount: gross,
+      vat_amount: vat_amount,
+      payment_method: payment_method,
+      metadata: { items: currentCart, split: splitPay, table: activeTable, transaction_id: currentTable.transaction_id }
+    }]);
     if (!error) {
-      // Clear local and remote table
-      await supabase.from('active_tables').update({ orders: [], table_status: 'open', transaction_id: crypto.randomUUID() }).eq('table_number', activeTable);
+      await supabase.from('active_tables').update({ orders: [], transaction_id: crypto.randomUUID() }).eq('table_number', activeTable);
       setV4Tables(prev => prev.map(t => t.id === activeTable ? { ...t, orders: [], transaction_id: crypto.randomUUID() } : t));
       setSplitPay({ card: 0, cash: 0, atoa: 0, tips: 0 });
       setShowSettle(false);
+      triggerPrint();
       toast.success("SALE HARDENED: GOLD SECURED");
+    } else {
+      toast.error("VAULT WRITE FAILED: SCHEMA RIFT");
     }
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', background: CHARCOAL, color: 'white', fontFamily: 'monospace', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100vw', background: CHARCOAL, color: 'white', fontFamily: 'monospace', overflow: 'hidden', touchAction: 'manipulation' }}>
+      <Toaster theme="dark" position="top-center" richColors />
       
-      {/* 1. RAIL */}
-      <aside style={{ width: '85px', background: '#000', borderRight: '1px solid #333', display: 'flex', flexDirection: 'column', padding: '10px', gap: '8px' }}>
-        {TABLES.map(t => {
-          const tData = v4Tables.find(v => v.id === t);
-          const hasOrders = (tData?.orders?.length || 0) > 0;
-          return (
-            <button key={t} onClick={() => setActiveTable(t)} 
-              style={{ 
-                height: '50px', 
-                border: `1px solid ${activeTable === t ? DOJO_GREEN : (hasOrders ? '#555' : '#222')}`, 
-                color: activeTable === t ? DOJO_GREEN : '#666', 
-                background: activeTable === t ? 'rgba(0,204,102,0.1)' : 'transparent', 
-                fontWeight: 'bold' 
-              }}>T{t}</button>
-          );
-        })}
-        <button onClick={async () => {
-          const { data } = await supabase.from('sales_ledger').select('*').order('created_at', { ascending: false }).limit(15);
-          setHistory(data || []);
-          setShowHistory(true);
-        }} style={{ marginTop: 'auto', height: '55px', border: '1px solid #333' }}><History size={22} color={DOJO_GREEN}/></button>
-        <button onClick={() => setShowAdmin(!showAdmin)} style={{ height: '55px', border: '1px solid #333' }}><Settings size={22} color={showAdmin ? DOJO_GREEN : '#444'} /></button>
-      </aside>
+      <header style={{ background: '#000', borderBottom: '1px solid #333', zIndex: 10 }}>
+        <div style={{ display: 'flex', overflowX: 'auto', gap: '8px', padding: '10px' }}>
+          {TABLES.map(t => (
+            <button key={t} onClick={() => setActiveTable(t)} style={{ height: '44px', minWidth: '55px', border: `1px solid ${activeTable === t ? DOJO_GREEN : '#222'}`, color: activeTable === t ? DOJO_GREEN : '#666', background: activeTable === t ? 'rgba(0,204,102,0.1)' : 'transparent', fontWeight: '900' }}>T{t}</button>
+          ))}
+          <button onClick={async () => {
+            const { data } = await supabase.from('financial_ledger').select('*').order('created_at', { ascending: false }).limit(15);
+            setHistory(data || []);
+            setShowHistory(true);
+          }} style={{ minWidth: '55px', border: '1px solid #333' }}><History size={20} color={DOJO_GREEN}/></button>
+        </div>
+        <div style={{ display: 'flex', overflowX: 'auto', background: '#111' }}>
+          {categories.map(cat => (
+            <button key={cat} onClick={() => setActiveCat(cat)} style={{ padding: '12px 20px', borderRight: '1px solid #222', background: activeCat === cat ? DOJO_GREEN : 'transparent', color: activeCat === cat ? '#000' : '#fff', fontWeight: '900', fontSize: '11px', whiteSpace: 'nowrap' }}>{cat}</button>
+          ))}
+        </div>
+      </header>
 
-      {/* 2. MAIN ENGINE */}
-      <main style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', background: '#161616' }}>
-        {showAdmin ? (
-          <div style={{ padding: '40px', overflowY: 'auto' }}>
-            <h2 style={{ color: DOJO_GREEN, letterSpacing: '2px', marginBottom: '30px' }}>SYSTEM_ADMIN</h2>
-            <button onClick={() => {
-                const name = prompt("Item Name:");
-                const price = parseFloat(prompt("Price:") || "0");
-                const cat = prompt("Category:") || "EXTRAS";
-                if(name) setMenu([...menu, { id: crypto.randomUUID(), name, price, category: cat.toUpperCase(), profile: 'hot_food' }]);
-            }} style={{ background: DOJO_GREEN, color: '#000', padding: '15px 30px', fontWeight: 'bold', marginBottom: '30px' }}>+ ADD MENU ITEM</button>
-            <div style={{ display: 'grid', gap: '10px' }}>{menu.map(m => (<div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', background: '#000', padding: '15px', border: '1px solid #333' }}><span>{m.name} <small style={{ opacity: 0.4 }}>[{m.category}]</small></span><span style={{ color: DOJO_GREEN }}>£{m.price.toFixed(2)}</span></div>))}</div>
-          </div>
-        ) : (
-          <>
-            <div style={{ display: 'flex', background: '#000', borderBottom: '1px solid #333', overflowX: 'auto' }}>
-              {categories.map(cat => (<button key={cat} onClick={() => setActiveCat(cat)} style={{ padding: '20px 35px', borderRight: '1px solid #333', background: activeCat === cat ? DOJO_GREEN : 'transparent', color: activeCat === cat ? '#000' : '#fff', fontWeight: '900' }}>{cat}</button>))}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '10px', padding: '20px', overflowY: 'auto' }}>
-              {menu.filter(m => m.category === activeCat).map(item => (<button key={item.id} onClick={() => addToCart(item)} style={{ height: '110px', background: '#222', border: '1px solid #333', padding: '15px', textAlign: 'left', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}><span style={{ fontWeight: 'bold', fontSize: '11px', color: '#ccc' }}>{item.name}</span><span style={{ textAlign: 'right', color: DOJO_GREEN, fontWeight: 'bold', fontSize: '20px' }}>£{item.price.toFixed(2)}</span></button>))}
-            </div>
-          </>
-        )}
+      <main style={{ flexGrow: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', padding: '8px', overflowY: 'auto', alignContent: 'start' }}>
+        {menu.filter(m => m.category === activeCat).map(item => (
+          <button key={item.id} onClick={() => addToCart(item)} style={{ height: '100px', background: '#222', border: '1px solid #333', padding: '12px', textAlign: 'left', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <span style={{ fontWeight: 'bold', fontSize: '11px', color: '#ccc', textTransform: 'uppercase' }}>{item.name}</span>
+            <span style={{ textAlign: 'right', color: DOJO_GREEN, fontWeight: '900', fontSize: '18px' }}>£{item.price.toFixed(2)}</span>
+          </button>
+        ))}
       </main>
 
-      {/* 3. SIDEBAR */}
-      <aside style={{ width: '380px', background: '#0a0a0a', borderLeft: '1px solid #333', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '20px', background: '#000', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <footer style={{ background: '#000', borderTop: `2px solid ${DOJO_GREEN}`, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
+        <div onClick={() => setShowCart(true)} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <ShoppingCart size={22} color={DOJO_GREEN} />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ color: DOJO_GREEN, fontWeight: '900', fontSize: '18px' }}>T{activeTable} ACTIVE</span>
-            <span style={{ fontSize: '8px', opacity: 0.3 }}>ID: {currentTable.transaction_id}</span>
-          </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button onClick={() => setOrderType(orderType === 'dine-in' ? 'takeaway' : 'dine-in')} style={{ fontSize: '10px', border: `1px solid ${DOJO_GREEN}`, padding: '4px 8px', color: DOJO_GREEN }}>{orderType.toUpperCase()}</button>
-            <button onClick={() => setV4Tables(prev => prev.map(t => t.id === activeTable ? { ...t, orders: [] } : t))}><Trash2 size={18} opacity={0.3}/></button>
+            <span style={{ fontSize: '18px', fontWeight: '900' }}>£{totals.gross.toFixed(2)}</span>
+            <span style={{ fontSize: '9px', opacity: 0.5 }}>VIEW T{activeTable} CART <ChevronUp size={8} style={{ display: 'inline', marginLeft: '4px' }} /></span>
           </div>
         </div>
-        <div style={{ flexGrow: 1, padding: '20px', overflowY: 'auto' }}>
-          {currentCart.map((i, idx) => (<div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '12px', opacity: i.sent ? 0.4 : 1 }}><span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>{i.sent && <CheckCircle size={12} color={DOJO_GREEN} />}{i.qty}x {i.name}</span><span>£{(i.price * (i.qty || 1)).toFixed(2)}</span></div>))}
-        </div>
-        <div style={{ padding: '20px', background: '#000', borderTop: '1px solid #333' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '26px', fontWeight: '900', color: DOJO_GREEN, marginBottom: '20px' }}><span style={{ color: 'white', opacity: 0.3 }}>TOTAL</span><span>£{totals.gross.toFixed(2)}</span></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
-            <button onClick={saveToTable} style={{ background: '#222', color: DOJO_GREEN, padding: '18px', fontWeight: 'bold', border: `1px solid ${DOJO_GREEN}` }}><Save size={20} /><br/>SAVE TAB</button>
-            <button onClick={() => {
-                const receiptWindow = window.open('', '_blank');
-                if (!receiptWindow) return;
-                receiptWindow.document.write(`<pre style="font-family: monospace; font-size: 14px; padding: 20px;">MO' MANGIO! - AUTHENTIC ITALIAN\nDate: ${new Date().toLocaleString()}\nTable: ${activeTable}\n----------------------------------------\n${currentCart.map(i => `${i.qty}x ${i.name.padEnd(22)} £${(i.price * (i.qty || 1)).toFixed(2)}`).join('\n')}\n----------------------------------------\nTOTAL: £${totals.gross.toFixed(2)}\nVAT: £${totals.vat20.toFixed(2)}\n----------------------------------------\nGRAZIE MILLE!</pre>`);
-                receiptWindow.print();
-                receiptWindow.close();
-            }} style={{ background: '#222', color: '#fff', padding: '18px', fontWeight: 'bold' }}><Printer size={20} /><br/>RECEIPT</button>
-          </div>
-          <button onClick={() => setShowSettle(true)} style={{ width: '100%', background: DOJO_GREEN, color: '#000', padding: '20px', fontWeight: '900', fontSize: '18px' }}>SETTLE TRANSACTION</button>
-        </div>
-      </aside>
+        <button onClick={() => setShowSettle(true)} style={{ background: DOJO_GREEN, color: '#000', padding: '12px 24px', fontWeight: '900', fontSize: '14px', border: 'none' }}>SETTLE</button>
+      </footer>
 
-      {/* 4. OVERLAYS */}
+      {showCart && (
+        <div style={{ position: 'fixed', inset: 0, background: CHARCOAL, zIndex: 100, display: 'flex', flexDirection: 'column' }}>
+          <header style={{ padding: '20px', background: '#000', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontWeight: '900', color: DOJO_GREEN }}>T{activeTable} LEDGER</span>
+            <X onClick={() => setShowCart(false)} />
+          </header>
+          <div style={{ flexGrow: 1, padding: '16px', overflowY: 'auto' }}>
+            {currentCart.map((i, idx) => (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '13px', opacity: i.sent ? 0.4 : 1 }}>
+                <span>{i.sent && <CheckCircle size={10} color={DOJO_GREEN} style={{ display: 'inline', marginRight: '4px' }} />} {i.qty}x {i.name}</span>
+                <span>£{(i.price * (i.qty || 1)).toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: '16px', borderTop: '1px solid #333', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <button onClick={saveToTable} style={{ background: '#222', color: DOJO_GREEN, padding: '18px', fontWeight: 'bold', border: `1px solid ${DOJO_GREEN}` }}>SAVE TAB</button>
+            <button onClick={() => setShowCart(false)} style={{ background: DOJO_GREEN, color: '#000', padding: '18px', fontWeight: 'bold' }}>BACK</button>
+          </div>
+        </div>
+      )}
+
       {showSettle && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.97)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#111', width: '420px', border: `1px solid ${DOJO_GREEN}`, padding: '40px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '30px', borderBottom: '1px solid #333', paddingBottom: '15px' }}><span style={{ fontWeight: 'bold' }}>SETTLEMENT: TABLE {activeTable}</span><X onClick={() => setShowSettle(false)} style={{ cursor: 'pointer' }} /></div>
-            <div style={{ background: '#000', padding: '25px', textAlign: 'center', marginBottom: '25px' }}><span style={{ fontSize: '10px', opacity: 0.5 }}>REMAINING</span><div style={{ fontSize: '42px', color: DOJO_GREEN, fontWeight: '900' }}>£{(totals.gross - (splitPay.card + splitPay.cash + splitPay.atoa)).toFixed(2)}</div></div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <PaymentLine label="CARD" val={splitPay.card} set={v => setSplitPay({...splitPay, card: v})} />
-              <PaymentLine label="CASH" val={splitPay.cash} set={v => setSplitPay({...splitPay, cash: v})} />
-              <button onClick={triggerAtoa} style={{ background: '#000', border: `1px solid ${DOJO_GREEN}`, color: DOJO_GREEN, padding: '15px', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>ATOA (0.7%)</span>
-                <span style={{ fontSize: '20px' }}>£{splitPay.atoa.toFixed(2)}</span>
-              </button>
-              <PaymentLine label="TIPS" val={splitPay.tips} set={v => setSplitPay({...splitPay, tips: v})} />
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.97)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: '20px' }}>
+          <div style={{ background: '#111', width: '100%', maxWidth: '400px', border: `1px solid ${DOJO_GREEN}`, padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}><span style={{ fontWeight: '900' }}>T{activeTable} SETTLEMENT</span><X onClick={() => setShowSettle(false)} /></div>
+            <div style={{ background: '#000', padding: '20px', textAlign: 'center', marginBottom: '20px' }}>
+              <div style={{ fontSize: '36px', color: DOJO_GREEN, fontWeight: '900' }}>£{(totals.gross - (splitPay.card + splitPay.cash + splitPay.atoa)).toFixed(2)}</div>
             </div>
-            <button onClick={finalize} style={{ width: '100%', background: DOJO_GREEN, color: '#000', padding: '20px', marginTop: '30px', fontWeight: '900', fontSize: '18px' }}>FINALIZE SALE</button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <PaymentLine label="CASH" val={splitPay.cash} set={v => setSplitPay({...splitPay, cash: v})} />
+              <PaymentLine label="CARD" val={splitPay.card} set={v => setSplitPay({...splitPay, card: v})} />
+              <PaymentLine label="TIPS" val={splitPay.tips} set={v => setSplitPay({...splitPay, tips: v})} />
+              <button onClick={triggerAtoa} style={{ background: '#000', border: `1px solid ${DOJO_GREEN}`, color: DOJO_GREEN, padding: '15px', fontWeight: '900' }}>ATOA PAY</button>
+            </div>
+            <button onClick={finalize} style={{ width: '100%', background: DOJO_GREEN, color: '#000', padding: '18px', marginTop: '20px', fontWeight: '900' }}>FINALIZE SALE</button>
           </div>
         </div>
       )}
 
       {showHistory && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.97)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-          <div style={{ background: '#111', width: '500px', border: `1px solid ${DOJO_GREEN}`, padding: '40px' }}>
-             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}><span>HISTORY</span><X onClick={() => setShowHistory(false)}/></div>
-             <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
-                {history.map(tx => (
-                  <div key={tx.id} style={{ padding: '10px', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>T{tx.table_id} - £{tx.gross_sales.toFixed(2)}</span>
-                    <span style={{ opacity: 0.3 }}>{new Date(tx.created_at).toLocaleTimeString()}</span>
-                  </div>
-                ))}
-             </div>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.97)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: '20px' }}>
+          <div style={{ background: '#111', width: '100%', maxWidth: '500px', border: `1px solid ${DOJO_GREEN}`, padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}><span>VAULT HISTORY</span><X onClick={() => setShowHistory(false)}/></div>
+            <div style={{ maxHeight: '60dvh', overflowY: 'auto' }}>
+              {history.map(tx => (
+                <div key={tx.id} style={{ padding: '12px', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>T{tx.metadata?.table || '?'} - £{tx.gross_amount?.toFixed(2)}</span>
+                  <span style={{ opacity: 0.3 }}>{tx.created_at ? new Date(tx.created_at).toLocaleTimeString() : ''}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
-
-      <Toaster theme="dark" position="top-center" richColors />
     </div>
   );
 }
 
 function PaymentLine({ label, val, set }: { label: string, val: number, set: (v: number) => void }) {
-    return (<div style={{ display: 'flex', alignItems: 'center', background: '#000', border: '1px solid #333', padding: '12px' }}><span style={{ fontSize: '10px', width: '90px', fontWeight: 'bold' }}>{label}</span><input type="number" value={val || ''} onChange={e => set(parseFloat(e.target.value) || 0)} style={{ flexGrow: 1, background: 'transparent', border: 'none', color: DOJO_GREEN, textAlign: 'right', fontSize: '24px', fontWeight: '900', outline: 'none' }} /></div>);
+    return (<div style={{ display: 'flex', alignItems: 'center', background: '#000', border: '1px solid #333', padding: '12px' }}><span style={{ fontSize: '10px', width: '70px', fontWeight: 'bold' }}>{label}</span><input type="number" value={val || ''} onChange={e => set(parseFloat(e.target.value) || 0)} style={{ flexGrow: 1, background: 'transparent', border: 'none', color: DOJO_GREEN, textAlign: 'right', fontSize: '20px', fontWeight: '900', outline: 'none' }} /></div>);
 }

@@ -15,6 +15,7 @@ Deno.serve(async (req) => {
   if (error || !report) return new Response('Refinery Empty or No Sales Today', { status: 404 })
 
   // 2. The Resend Dispatch (The Courier)
+  // UPDATED: Using verified contact.momangio.co.uk domain to bypass sandbox restrictions
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -22,7 +23,7 @@ Deno.serve(async (req) => {
       'Authorization': `Bearer ${Deno.env.get('RESEND_API_KEY')}`,
     },
     body: JSON.stringify({
-      from: 'Mo Mangio Reports <onboarding@resend.dev>',
+      from: 'Mo Mangio Reports <reports@contact.momangio.co.uk>',
       to: ['director@momangio.co.uk'], 
       subject: `Z-Report: ${report.shift_date}`,
       text: `
