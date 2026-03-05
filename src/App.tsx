@@ -3,7 +3,6 @@ import { Toaster, toast } from 'sonner';
 import { Printer, Trash2, Settings, X, Save, History, CheckCircle, ShoppingCart, ChevronUp, CreditCard } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
-// --- 1. SOVEREIGN CONFIGURATION ---
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL || "", 
   import.meta.env.VITE_SUPABASE_ANON_KEY || ""
@@ -13,7 +12,6 @@ const TABLES = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"];
 const DOJO_GREEN = "#00CC66";
 const CHARCOAL = "#1A1A1A";
 
-// --- 2. HARDENED TYPES ---
 interface MenuItem {
   id: string;
   name: string;
@@ -198,10 +196,10 @@ GRAZIE MILLE!
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100vw', background: CHARCOAL, color: 'white', fontFamily: 'monospace', overflow: 'hidden', touchAction: 'manipulation' }}>
+    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: CHARCOAL, color: 'white', fontFamily: 'monospace', overflow: 'hidden', touchAction: 'none' }}>
       <Toaster theme="dark" position="top-center" richColors />
       
-      <header style={{ background: '#000', borderBottom: '1px solid #333', zIndex: 10 }}>
+      <header style={{ background: '#000', borderBottom: '1px solid #333', zIndex: 10, paddingTop: 'env(safe-area-inset-top)' }}>
         <div style={{ display: 'flex', overflowX: 'auto', gap: '8px', padding: '10px' }}>
           {TABLES.map(t => (
             <button key={t} onClick={() => setActiveTable(t)} style={{ height: '44px', minWidth: '55px', border: `1px solid ${activeTable === t ? DOJO_GREEN : '#222'}`, color: activeTable === t ? DOJO_GREEN : '#666', background: activeTable === t ? 'rgba(0,204,102,0.1)' : 'transparent', fontWeight: '900' }}>T{t}</button>
@@ -212,17 +210,17 @@ GRAZIE MILLE!
             setShowHistory(true);
           }} style={{ minWidth: '55px', border: '1px solid #333' }}><History size={20} color={DOJO_GREEN}/></button>
         </div>
-        <div style={{ display: 'flex', overflowX: 'auto', background: '#111' }}>
+        <div style={{ display: 'flex', overflowX: 'auto', background: '#111', borderTop: '1px solid #222' }}>
           {categories.map(cat => (
             <button key={cat} onClick={() => setActiveCat(cat)} style={{ padding: '12px 20px', borderRight: '1px solid #222', background: activeCat === cat ? DOJO_GREEN : 'transparent', color: activeCat === cat ? '#000' : '#fff', fontWeight: '900', fontSize: '11px', whiteSpace: 'nowrap' }}>{cat}</button>
           ))}
         </div>
       </header>
 
-      <main style={{ flexGrow: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', padding: '8px', overflowY: 'auto', alignContent: 'start' }}>
+      <main style={{ flexGrow: 1, display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', padding: '8px', overflowY: 'auto', alignContent: 'start', WebkitOverflowScrolling: 'touch' }}>
         {menu.filter(m => m.category === activeCat).map(item => (
-          <button key={item.id} onClick={() => addToCart(item)} style={{ height: '100px', background: '#222', border: '1px solid #333', padding: '12px', textAlign: 'left', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            <span style={{ fontWeight: 'bold', fontSize: '11px', color: '#ccc', textTransform: 'uppercase' }}>{item.name}</span>
+          <button key={item.id} onClick={() => addToCart(item)} style={{ height: '110px', background: '#222', border: '1px solid #333', padding: '12px', textAlign: 'left', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', borderRadius: '0' }}>
+            <span style={{ fontWeight: 'bold', fontSize: '11px', color: '#ccc', textTransform: 'uppercase', lineHeight: '1.2' }}>{item.name}</span>
             <span style={{ textAlign: 'right', color: DOJO_GREEN, fontWeight: '900', fontSize: '18px' }}>£{item.price.toFixed(2)}</span>
           </button>
         ))}
@@ -233,14 +231,14 @@ GRAZIE MILLE!
           <ShoppingCart size={22} color={DOJO_GREEN} />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <span style={{ fontSize: '18px', fontWeight: '900' }}>£{totals.gross.toFixed(2)}</span>
-            <span style={{ fontSize: '9px', opacity: 0.5 }}>VIEW T{activeTable} CART <ChevronUp size={8} style={{ display: 'inline', marginLeft: '4px' }} /></span>
+            <span style={{ fontSize: '9px', opacity: 0.5 }}>T{activeTable} CART <ChevronUp size={8} style={{ display: 'inline' }} /></span>
           </div>
         </div>
-        <button onClick={() => setShowSettle(true)} style={{ background: DOJO_GREEN, color: '#000', padding: '12px 24px', fontWeight: '900', fontSize: '14px', border: 'none' }}>SETTLE</button>
+        <button onClick={() => setShowSettle(true)} style={{ background: DOJO_GREEN, color: '#000', padding: '14px 28px', fontWeight: '900', fontSize: '14px', border: 'none' }}>SETTLE</button>
       </footer>
 
       {showCart && (
-        <div style={{ position: 'fixed', inset: 0, background: CHARCOAL, zIndex: 100, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'fixed', inset: 0, background: CHARCOAL, zIndex: 100, display: 'flex', flexDirection: 'column', paddingTop: 'env(safe-area-inset-top)' }}>
           <header style={{ padding: '20px', background: '#000', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontWeight: '900', color: DOJO_GREEN }}>T{activeTable} LEDGER</span>
             <X onClick={() => setShowCart(false)} />
@@ -253,7 +251,7 @@ GRAZIE MILLE!
               </div>
             ))}
           </div>
-          <div style={{ padding: '16px', borderTop: '1px solid #333', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <div style={{ padding: '16px', borderTop: '1px solid #333', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
             <button onClick={saveToTable} style={{ background: '#222', color: DOJO_GREEN, padding: '18px', fontWeight: 'bold', border: `1px solid ${DOJO_GREEN}` }}>SAVE TAB</button>
             <button onClick={() => setShowCart(false)} style={{ background: DOJO_GREEN, color: '#000', padding: '18px', fontWeight: 'bold' }}>BACK</button>
           </div>
@@ -298,5 +296,5 @@ GRAZIE MILLE!
 }
 
 function PaymentLine({ label, val, set }: { label: string, val: number, set: (v: number) => void }) {
-    return (<div style={{ display: 'flex', alignItems: 'center', background: '#000', border: '1px solid #333', padding: '12px' }}><span style={{ fontSize: '10px', width: '70px', fontWeight: 'bold' }}>{label}</span><input type="number" value={val || ''} onChange={e => set(parseFloat(e.target.value) || 0)} style={{ flexGrow: 1, background: 'transparent', border: 'none', color: DOJO_GREEN, textAlign: 'right', fontSize: '20px', fontWeight: '900', outline: 'none' }} /></div>);
+    return (<div style={{ display: 'flex', alignItems: 'center', background: '#000', border: '1px solid #333', padding: '12px' }}><span style={{ fontSize: '10px', width: '70px', fontWeight: 'bold' }}>{label}</span><input type="number" inputMode="decimal" value={val || ''} onChange={e => set(parseFloat(e.target.value) || 0)} style={{ flexGrow: 1, background: 'transparent', border: 'none', color: DOJO_GREEN, textAlign: 'right', fontSize: '20px', fontWeight: '900', outline: 'none' }} /></div>);
 }
