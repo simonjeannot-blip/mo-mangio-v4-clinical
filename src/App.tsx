@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Toaster, toast } from 'sonner';
-import { X, History, CheckCircle, ShoppingCart, Printer, Save, Utensils, ShoppingBag } from 'lucide-react';
+import { X, History, CheckCircle, ShoppingCart, Printer, Save, Utensils, ShoppingBag, Smartphone } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 // --- 1. SOVEREIGN CONFIGURATION ---
@@ -165,8 +165,8 @@ GRAZIE MILLE!
     const { gross, vat_amount } = totals;
     const payment_method = splitPay.cash > 0 ? 'cash' : (splitPay.atoa > 0 ? 'atoa' : 'card');
     
-    // BYPASSING DB DIGEST: Direct write to hardened columns
-    const { error } = await supabase.from('financial_ledger').insert([{ 
+    // VAULT WRITE: Record to financial_ledger
+    const { error: ledgerError } = await supabase.from('financial_ledger').insert([{ 
       gross_amount: gross,
       vat_amount: vat_amount,
       payment_method: payment_method,
@@ -180,11 +180,16 @@ GRAZIE MILLE!
       }
     }]);
 
-    if (!error) {
-      await supabase.from('active_tables').update({ 
-        orders: [], 
-        transaction_id: crypto.randomUUID() 
-      }).eq('table_number', activeTable);
+    if (!ledgerError) {
+      // RPC BYPASS: Clear active_tables (Avoids CORS PATCH Blockade)
+      const { error: rpcError } = await supabase.rpc('clear_table_orders', { 
+        target_table_number: activeTable 
+      });
+
+      if (rpcError) {
+          console.error("RPC Failure:", rpcError);
+          toast.error("LEDGER SAVED BUT TABLE RESET FAILED");
+      }
       
       setV4Tables(prev => prev.map(t => t.id === activeTable ? { ...t, orders: [], transaction_id: crypto.randomUUID() } : t));
       setSplitPay({ card: 0, cash: 0, atoa: 0, tips: 0 });
@@ -192,8 +197,8 @@ GRAZIE MILLE!
       triggerPrint();
       toast.success("SALE HARDENED: GOLD SECURED");
     } else {
-      console.error("Refinery Blockade:", error);
-      toast.error(`VAULT WRITE FAILED: ${error.message}`);
+      console.error("Refinery Blockade:", ledgerError);
+      toast.error(`VAULT WRITE FAILED: ${ledgerError.message}`);
     }
   };
 
@@ -293,9 +298,10 @@ GRAZIE MILLE!
               <div style={{ fontSize: '10px', opacity: 0.5 }}>INC £{totals.vat_amount.toFixed(2)} VAT</div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <PaymentLine label="CASH" val={splitPay.cash} set={v => setSplitPay({...splitPay, cash: v})} />
-              <PaymentLine label="CARD" val={splitPay.card} set={v => setSplitPay({...splitPay, card: v})} />
-              <PaymentLine label="TIPS" val={splitPay.tips} set={v => setSplitPay({...splitPay, tips: v})} />
+              <PaymentLine label="CASH" icon={<History size={14}/>} val={splitPay.cash} set={v => setSplitPay({...splitPay, cash: v})} />
+              <PaymentLine label="CARD" icon={<History size={14}/>} val={splitPay.card} set={v => setSplitPay({...splitPay, card: v})} />
+              <PaymentLine label="ATOA" icon={<Smartphone size={14} color={DOJO_GREEN}/>} val={splitPay.atoa} set={v => setSplitPay({...splitPay, atoa: v})} />
+              <PaymentLine label="TIPS" icon={<History size={14}/>} val={splitPay.tips} set={v => setSplitPay({...splitPay, tips: v})} />
             </div>
             <button onClick={finalize} style={{ width: '100%', background: DOJO_GREEN, color: '#000', padding: '18px', marginTop: '20px', fontWeight: '900' }}>FINALIZE SALE</button>
           </div>
@@ -321,6 +327,20 @@ GRAZIE MILLE!
   );
 }
 
-function PaymentLine({ label, val, set }: { label: string, val: number, set: (v: number) => void }) {
-    return (<div style={{ display: 'flex', alignItems: 'center', background: '#000', border: '1px solid #333', padding: '12px' }}><span style={{ fontSize: '10px', width: '70px', fontWeight: 'bold' }}>{label}</span><input type="number" inputMode="decimal" value={val || ''} onChange={e => set(parseFloat(e.target.value) || 0)} style={{ flexGrow: 1, background: 'transparent', border: 'none', color: DOJO_GREEN, textAlign: 'right', fontSize: '20px', fontWeight: '900', outline: 'none' }} /></div>);
+function PaymentLine({ label, val, set, icon }: { label: string, val: number, set: (v: number) => void, icon?: any }) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', background: '#000', border: '1px solid #333', padding: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '80px' }}>
+          {icon}
+          <span style={{ fontSize: '10px', fontWeight: 'bold' }}>{label}</span>
+        </div>
+        <input 
+          type="number" 
+          inputMode="decimal" 
+          value={val || ''} 
+          onChange={e => set(parseFloat(e.target.value) || 0)} 
+          style={{ flexGrow: 1, background: 'transparent', border: 'none', color: DOJO_GREEN, textAlign: 'right', fontSize: '20px', fontWeight: '900', outline: 'none' }} 
+        />
+      </div>
+    );
 }
