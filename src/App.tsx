@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Toaster, toast } from 'sonner';
 import { X, History, CheckCircle, ShoppingCart, Printer, Save, Utensils, ShoppingBag, Smartphone } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
@@ -86,29 +86,40 @@ export default function App() {
   const [splitPay, setSplitPay] = useState({ card: 0, cash: 0, atoa: 0, tips: 0 });
   const [orderType, setOrderType] = useState<'dine-in'|'takeaway'>('dine-in');
 
+  const fetchHistory = useCallback(async () => {
+    const { data } = await supabase
+      .from('financial_ledger')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(15);
+    if (data) setHistory(data);
+  }, []);
+
+  const syncV4 = useCallback(async () => {
+    const { data } = await supabase.from('active_tables').select('*');
+    if (data) {
+      const synced = TABLES.map(tNum => {
+        const dbRow = data.find(r => r.table_number === tNum);
+        return {
+          id: tNum,
+          transaction_id: dbRow?.transaction_id || crypto.randomUUID(),
+          table_status: dbRow?.table_status || 'open',
+          orders: dbRow?.orders || []
+        };
+      });
+      setV4Tables(synced);
+    }
+  }, []);
+
   useEffect(() => {
-    const syncV4 = async () => {
-      const { data } = await supabase.from('active_tables').select('*');
-      if (data) {
-        const synced = TABLES.map(tNum => {
-          const dbRow = data.find(r => r.table_number === tNum);
-          return {
-            id: tNum,
-            transaction_id: dbRow?.transaction_id || crypto.randomUUID(),
-            table_status: dbRow?.table_status || 'open',
-            orders: dbRow?.orders || []
-          };
-        });
-        setV4Tables(synced);
-      }
-    };
     syncV4();
+    fetchHistory();
 
     const channel = supabase.channel('table-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'active_tables' }, syncV4)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [syncV4, fetchHistory]);
 
   const currentTable = v4Tables.find(t => t.id === activeTable) || { id: activeTable, orders: [], transaction_id: '', table_status: 'open' };
   const currentCart = currentTable.orders;
@@ -165,7 +176,6 @@ GRAZIE MILLE!
     const { gross, vat_amount } = totals;
     const payment_method = splitPay.cash > 0 ? 'cash' : (splitPay.atoa > 0 ? 'atoa' : 'card');
     
-    // VAULT WRITE: Record to financial_ledger
     const { error: ledgerError } = await supabase.from('financial_ledger').insert([{ 
       gross_amount: gross,
       vat_amount: vat_amount,
@@ -176,20 +186,13 @@ GRAZIE MILLE!
         items: currentCart, 
         split: splitPay, 
         transaction_id: currentTable.transaction_id,
-        app_version: 'v4.2-clinical'
+        app_version: 'v4.3-clinical'
       }
     }]);
 
     if (!ledgerError) {
-      // RPC BYPASS: Clear active_tables (Avoids CORS PATCH Blockade)
-      const { error: rpcError } = await supabase.rpc('clear_table_orders', { 
-        target_table_number: activeTable 
-      });
-
-      if (rpcError) {
-          console.error("RPC Failure:", rpcError);
-          toast.error("LEDGER SAVED BUT TABLE RESET FAILED");
-      }
+      await supabase.rpc('clear_table_orders', { target_table_number: activeTable });
+      await fetchHistory();
       
       setV4Tables(prev => prev.map(t => t.id === activeTable ? { ...t, orders: [], transaction_id: crypto.randomUUID() } : t));
       setSplitPay({ card: 0, cash: 0, atoa: 0, tips: 0 });
@@ -212,21 +215,16 @@ GRAZIE MILLE!
             <button key={t} onClick={() => setActiveTable(t)} style={{ height: '44px', minWidth: '55px', border: `1px solid ${activeTable === t ? DOJO_GREEN : '#222'}`, color: activeTable === t ? DOJO_GREEN : '#666', background: activeTable === t ? 'rgba(0,204,102,0.1)' : 'transparent', fontWeight: '900' }}>T{t}</button>
           ))}
           
-          <button 
-            onClick={() => setOrderType(prev => prev === 'dine-in' ? 'takeaway' : 'dine-in')}
-            style={{ minWidth: '100px', border: `1px solid ${DOJO_GREEN}`, color: DOJO_GREEN, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '10px' }}
-          >
+          <button onClick={() => setOrderType(prev => prev === 'dine-in' ? 'takeaway' : 'dine-in')} style={{ minWidth: '100px', border: `1px solid ${DOJO_GREEN}`, color: DOJO_GREEN, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '10px' }}>
             {orderType === 'dine-in' ? <Utensils size={14}/> : <ShoppingBag size={14}/>}
             {orderType.toUpperCase()}
           </button>
 
-          <button onClick={async () => {
-            const { data } = await supabase.from('financial_ledger').select('*').order('created_at', { ascending: false }).limit(15);
-            setHistory(data || []);
-            setShowHistory(true);
-          }} style={{ minWidth: '55px', border: '1px solid #333' }}><History size={20} color={DOJO_GREEN}/></button>
+          <button onClick={() => { fetchHistory(); setShowHistory(true); }} style={{ minWidth: '55px', border: '1px solid #333' }}>
+            <History size={20} color={DOJO_GREEN}/>
+          </button>
         </div>
-        <div style={{ display: 'flex', overflowX: 'auto', background: '#111', borderTop: '1px solid #222' }}>
+        <div style={{ display: 'flex', overflowX: 'auto', background: '#111', borderTop: '1px solid #222', scrollbarWidth: 'none' }}>
           {categories.map(cat => (
             <button key={cat} onClick={() => setActiveCat(cat)} style={{ padding: '12px 20px', borderRight: '1px solid #222', background: activeCat === cat ? DOJO_GREEN : 'transparent', color: activeCat === cat ? '#000' : '#fff', fontWeight: '900', fontSize: '11px', whiteSpace: 'nowrap' }}>{cat}</button>
           ))}
@@ -250,15 +248,12 @@ GRAZIE MILLE!
             <span style={{ fontSize: '9px', color: DOJO_GREEN, opacity: 0.8 }}>VAT: £{totals.vat_amount.toFixed(2)}</span>
           </div>
         </div>
-        
         <button onClick={saveToTable} style={{ background: '#111', border: `1px solid ${DOJO_GREEN}`, color: DOJO_GREEN, padding: '10px', borderRadius: '4px' }}>
           <Save size={20} />
         </button>
-
         <button onClick={triggerPrint} style={{ background: '#111', border: `1px solid ${DOJO_GREEN}`, color: DOJO_GREEN, padding: '10px', borderRadius: '4px' }}>
           <Printer size={20} />
         </button>
-        
         <button onClick={() => setShowSettle(true)} style={{ background: DOJO_GREEN, color: '#000', padding: '12px 20px', fontWeight: '900', fontSize: '14px', border: 'none', borderRadius: '4px' }}>SETTLE</button>
       </footer>
 
@@ -275,7 +270,6 @@ GRAZIE MILLE!
                 <span>£{(i.price * (i.qty || 1)).toFixed(2)}</span>
               </div>
             ))}
-            
             <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '16px', textAlign: 'right' }}>
                <div style={{ fontSize: '12px', opacity: 0.5 }}>TAXABLE: {orderType === 'dine-in' ? 'FULL' : 'HOT ONLY'}</div>
                <div style={{ fontSize: '14px', marginBottom: '4px' }}>VAT INC: £{totals.vat_amount.toFixed(2)}</div>
@@ -292,10 +286,9 @@ GRAZIE MILLE!
       {showSettle && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.97)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: '20px' }}>
           <div style={{ background: '#111', width: '100%', maxWidth: '400px', border: `1px solid ${DOJO_GREEN}`, padding: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}><span style={{ fontWeight: '900' }}>T{activeTable} SETTLEMENT ({orderType.toUpperCase()})</span><X onClick={() => setShowSettle(false)} /></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}><span style={{ fontWeight: '900' }}>T{activeTable} SETTLEMENT</span><X onClick={() => setShowSettle(false)} /></div>
             <div style={{ background: '#000', padding: '20px', textAlign: 'center', marginBottom: '20px' }}>
               <div style={{ fontSize: '36px', color: DOJO_GREEN, fontWeight: '900' }}>£{(totals.gross - (splitPay.card + splitPay.cash + splitPay.atoa)).toFixed(2)}</div>
-              <div style={{ fontSize: '10px', opacity: 0.5 }}>INC £{totals.vat_amount.toFixed(2)} VAT</div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <PaymentLine label="CASH" icon={<History size={14}/>} val={splitPay.cash} set={v => setSplitPay({...splitPay, cash: v})} />
@@ -311,12 +304,12 @@ GRAZIE MILLE!
       {showHistory && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.97)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: '20px' }}>
           <div style={{ background: '#111', width: '100%', maxWidth: '500px', border: `1px solid ${DOJO_GREEN}`, padding: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}><span>VAULT HISTORY</span><X onClick={() => setShowHistory(false)}/></div>
-            <div style={{ maxHeight: '60dvh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}><span>VAULT HISTORY (LAST 15)</span><X onClick={() => setShowHistory(false)}/></div>
+            <div style={{ maxHeight: '60dvh', overflowY: 'auto', scrollbarWidth: 'none' }}>
               {history.map(tx => (
-                <div key={tx.id} style={{ padding: '12px', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>T{tx.table_number || '?'} - £{tx.gross_amount?.toFixed(2)}</span>
-                  <span style={{ opacity: 0.3 }}>{tx.created_at ? new Date(tx.created_at).toLocaleTimeString() : ''}</span>
+                <div key={tx.id} style={{ padding: '12px', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+                  <span>T{tx.table_number} - {tx.payment_method.toUpperCase()}</span>
+                  <span style={{ color: DOJO_GREEN, fontWeight: '900' }}>£{tx.gross_amount.toFixed(2)}</span>
                 </div>
               ))}
             </div>
@@ -334,13 +327,7 @@ function PaymentLine({ label, val, set, icon }: { label: string, val: number, se
           {icon}
           <span style={{ fontSize: '10px', fontWeight: 'bold' }}>{label}</span>
         </div>
-        <input 
-          type="number" 
-          inputMode="decimal" 
-          value={val || ''} 
-          onChange={e => set(parseFloat(e.target.value) || 0)} 
-          style={{ flexGrow: 1, background: 'transparent', border: 'none', color: DOJO_GREEN, textAlign: 'right', fontSize: '20px', fontWeight: '900', outline: 'none' }} 
-        />
+        <input type="number" inputMode="decimal" value={val || ''} onChange={e => set(parseFloat(e.target.value) || 0)} style={{ flexGrow: 1, background: 'transparent', border: 'none', color: DOJO_GREEN, textAlign: 'right', fontSize: '20px', fontWeight: '900', outline: 'none' }} />
       </div>
     );
 }
