@@ -174,34 +174,42 @@ GRAZIE MILLE!
 
   const finalize = async () => {
     const { gross, vat_amount } = totals;
+    const paidTotal = Number((splitPay.card + splitPay.cash + splitPay.atoa).toFixed(2));
+    const diff = Number((gross - paidTotal).toFixed(2));
+
+    // ATOMIC LOCK: Absolute Truth check
+    if (Math.abs(diff) > 0.01) {
+      toast.error(`BALANCE MISMATCH: £${diff.toFixed(2)} REMAINING`);
+      return;
+    }
+
     const payment_method = splitPay.cash > 0 ? 'cash' : (splitPay.atoa > 0 ? 'atoa' : 'card');
     
-    const { error: ledgerError } = await supabase.from('financial_ledger').insert([{ 
-      gross_amount: gross,
-      vat_amount: vat_amount,
-      payment_method: payment_method,
-      table_number: activeTable,
-      order_type: orderType,
-      metadata: { 
+    // THE UNIFIER: Calling the RPC for atomic settle/clear
+    const { error: rpcError } = await supabase.rpc('settle_and_clear_v2', { 
+      target_table_number: activeTable,
+      gross: gross,
+      vat: vat_amount,
+      pay_method: payment_method,
+      order_type_val: orderType,
+      meta: { 
         items: currentCart, 
         split: splitPay, 
         transaction_id: currentTable.transaction_id,
-        app_version: 'v4.3-clinical'
+        app_version: 'v4.4-hardened'
       }
-    }]);
+    });
 
-    if (!ledgerError) {
-      await supabase.rpc('clear_table_orders', { target_table_number: activeTable });
-      await fetchHistory();
-      
+    if (!rpcError) {
       setV4Tables(prev => prev.map(t => t.id === activeTable ? { ...t, orders: [], transaction_id: crypto.randomUUID() } : t));
       setSplitPay({ card: 0, cash: 0, atoa: 0, tips: 0 });
       setShowSettle(false);
       triggerPrint();
-      toast.success("SALE HARDENED: GOLD SECURED");
+      fetchHistory();
+      toast.success("SALE HARDENED: VAULT LOCKED");
     } else {
-      console.error("Refinery Blockade:", ledgerError);
-      toast.error(`VAULT WRITE FAILED: ${ledgerError.message}`);
+      console.error("Refinery Blockade:", rpcError);
+      toast.error(`VAULT WRITE FAILED: ${rpcError.message}`);
     }
   };
 
@@ -296,7 +304,23 @@ GRAZIE MILLE!
               <PaymentLine label="ATOA" icon={<Smartphone size={14} color={DOJO_GREEN}/>} val={splitPay.atoa} set={v => setSplitPay({...splitPay, atoa: v})} />
               <PaymentLine label="TIPS" icon={<History size={14}/>} val={splitPay.tips} set={v => setSplitPay({...splitPay, tips: v})} />
             </div>
-            <button onClick={finalize} style={{ width: '100%', background: DOJO_GREEN, color: '#000', padding: '18px', marginTop: '20px', fontWeight: '900' }}>FINALIZE SALE</button>
+            <button 
+              onClick={finalize} 
+              disabled={Math.abs(totals.gross - (splitPay.card + splitPay.cash + splitPay.atoa)) > 0.01}
+              style={{ 
+                width: '100%', 
+                background: Math.abs(totals.gross - (splitPay.card + splitPay.cash + splitPay.atoa)) <= 0.01 ? DOJO_GREEN : '#333', 
+                color: '#000', 
+                padding: '18px', 
+                marginTop: '20px', 
+                fontWeight: '900',
+                opacity: Math.abs(totals.gross - (splitPay.card + splitPay.cash + splitPay.atoa)) <= 0.01 ? 1 : 0.5
+              }}
+            >
+              {Math.abs(totals.gross - (splitPay.card + splitPay.cash + splitPay.atoa)) > 0.01 
+                ? `NEED £${(totals.gross - (splitPay.card + splitPay.cash + splitPay.atoa)).toFixed(2)} MORE` 
+                : "FINALIZE SALE"}
+            </button>
           </div>
         </div>
       )}
