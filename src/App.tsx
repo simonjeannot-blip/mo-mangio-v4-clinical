@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Toaster, toast } from 'sonner';
-import { X, Printer, CreditCard, Banknote, QrCode, ShieldCheck, Trash2, Save } from 'lucide-react';
+import { X, Printer, CreditCard, Banknote, QrCode, ShieldCheck, Trash2 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const DOJO_GREEN = "#00CC66";
