@@ -124,14 +124,18 @@ export default function App() {
       <style>{`
         @media print {
           body * { visibility: hidden !important; }
-          #thermal-receipt, #thermal-receipt * { visibility: visible !important; }
+          #thermal-receipt, #thermal-receipt * { 
+            visibility: visible !important; 
+            color: black !important; 
+            display: block !important;
+          }
           #thermal-receipt { 
-            position: fixed; left: 0; top: 0; width: 72mm; 
-            background: white !important; color: black !important; 
-            padding: 10px; font-size: 11pt; display: block !important; 
-            line-height: 1.4; 
+            position: absolute; left: 0; top: 0; width: 72mm; 
+            background: white !important; padding: 0; margin: 0;
+            font-size: 11pt; line-height: 1.2;
           }
           .no-print { display: none !important; }
+          table { width: 100%; border-collapse: collapse; }
         }
         #thermal-receipt { display: none; }
       `}</style>
@@ -144,31 +148,25 @@ export default function App() {
             238 Haggerston Rd, London E8 4HT
          </div>
          <div style={{ borderBottom: '1px dashed black', margin: '5px 0' }}>T{activeTable} | {new Date().toLocaleTimeString()}</div>
-         {currentTable.orders.map((item, idx) => (
-           <div key={idx} style={{ clear: 'both', width: '100%', marginBottom: '4px' }}>
-             <span style={{ float: 'left' }}>1x {item.name.toUpperCase()}</span>
-             <span style={{ float: 'right' }}>£{item.price.toFixed(2)}</span>
-             <div style={{ clear: 'both' }}></div>
-           </div>
-         ))}
          
-         <div style={{ borderTop: '2px solid black', marginTop: '10px', paddingTop: '5px' }}>
-           <div style={{ float: 'left', fontWeight: 'bold', fontSize: '13pt' }}>TOTAL</div>
-           <div style={{ float: 'right', fontWeight: 'bold', fontSize: '13pt' }}>£{orderTotal.toFixed(2)}</div>
-           <div style={{ clear: 'both' }}></div>
-         </div>
+         <table style={{ width: '100%' }}>
+            <tbody>
+               {currentTable.orders.map((item, idx) => (
+                 <tr key={idx}>
+                    <td style={{ textAlign: 'left', verticalAlign: 'top' }}>1x {item.name.toUpperCase()}</td>
+                    <td style={{ textAlign: 'right', verticalAlign: 'top' }}>£{item.price.toFixed(2)}</td>
+                 </tr>
+               ))}
+               <tr>
+                  <td style={{ borderTop: '2px solid black', paddingTop: '8px', fontWeight: 'bold', fontSize: '13pt' }}>TOTAL</td>
+                  <td style={{ borderTop: '2px solid black', paddingTop: '8px', fontWeight: 'bold', fontSize: '13pt', textAlign: 'right' }}>£{orderTotal.toFixed(2)}</td>
+               </tr>
+            </tbody>
+         </table>
 
-         {splitPay.tips > 0 && (
-           <div style={{ clear: 'both', width: '100%', marginTop: '5px' }}>
-             <span style={{ float: 'left' }}>TIPS</span>
-             <span style={{ float: 'right' }}>£{splitPay.tips.toFixed(2)}</span>
-             <div style={{ clear: 'both' }}></div>
-           </div>
-         )}
-
-         <div style={{ textAlign: 'center', marginTop: '25px', fontWeight: 'bold' }}>
+         <div style={{ textAlign: 'center', marginTop: '20px', fontWeight: 'bold' }}>
            Grazie Mille!
-           <br/><br/><br/><br/><br/><br/>
+           <br/><br/><br/><br/><br/><br/><br/>
          </div>
       </div>
 
