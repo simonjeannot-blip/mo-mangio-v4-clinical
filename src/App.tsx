@@ -172,7 +172,7 @@ export default function App() {
 
       <header style={{ background: '#000', borderBottom: `2px solid ${DOJO_GREEN}`, padding: '10px' }} className="no-print">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}><ShieldCheck size={20} color={DOJO_GREEN} /><span style={{ fontWeight: 'bold' }}>SENTINEL V7.5-FINAL-SITE</span></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}><ShieldCheck size={20} color={DOJO_GREEN} /><span style={{ fontWeight: 'bold' }}>SENTINEL V7.6-EMERGENCY</span></div>
           <div style={{ color: DOJO_GREEN, fontWeight: '900' }}>LAST: £{hudStats.lastGold.toFixed(2)} | HOT: {hudStats.hotTables}</div>
         </div>
         <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px' }}>
