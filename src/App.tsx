@@ -1,6 +1,6 @@
 ﻿import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Toaster, toast } from 'sonner';
-import { X, Printer, CreditCard, Banknote, QrCode, ShieldCheck, Trash2 } from 'lucide-react';
+import { X, Printer, CreditCard, Banknote, QrCode, ShieldCheck, Trash2, Utensils, ShoppingBag } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const DOJO_GREEN = "#00CC66";
@@ -13,7 +13,7 @@ const TABLES = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"];
 type HMRCTag = 'Revenue_Sales' | 'Revenue_Other' | 'Excluded_Tips';
 
 interface MenuItem { id: string; name: string; price: number; profile: 'hot_food' | 'cold_food' | 'zero_rated'; category: string; hmrc_tag: HMRCTag; qty?: number; orderId?: string; }
-interface TableState { id: string; transaction_id: string; table_status: string; orders: MenuItem[]; covers?: number; }
+interface TableState { id: string; transaction_id: string; table_status: string; orders: MenuItem[]; covers?: number; order_type: 'dine-in' | 'take-away'; }
 
 const INITIAL_MENU: MenuItem[] = [
   { id: 's1', name: 'BRUSCHETTA', price: 4.40, profile: 'cold_food', category: 'STARTERS', hmrc_tag: 'Revenue_Sales' },
@@ -68,7 +68,14 @@ export default function App() {
     const { data } = await supabase.from('active_tables').select('*');
     const synced = TABLES.map(tNum => {
       const dbRow = data?.find(r => r.table_number === tNum);
-      return { id: tNum, transaction_id: dbRow?.transaction_id || crypto.randomUUID(), table_status: dbRow?.table_status || 'open', orders: dbRow?.orders || [], covers: dbRow?.covers || 0 };
+      return { 
+        id: tNum, 
+        transaction_id: dbRow?.transaction_id || crypto.randomUUID(), 
+        table_status: dbRow?.table_status || 'open', 
+        orders: dbRow?.orders || [], 
+        covers: dbRow?.covers || 0,
+        order_type: dbRow?.order_type || 'dine-in'
+      };
     });
     setV4Tables(synced);
     const { data: ledger } = await supabase.from('financial_ledger').select('gross_amount').order('created_at', { ascending: false }).limit(1);
@@ -81,19 +88,34 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, [syncV4]);
 
-  const currentTable = useMemo(() => v4Tables.find(t => t.id === activeTable) || { id: activeTable, orders: [], transaction_id: crypto.randomUUID(), table_status: 'open', covers: 0 }, [activeTable, v4Tables]);
+  const currentTable = useMemo(() => v4Tables.find(t => t.id === activeTable) || { id: activeTable, orders: [], transaction_id: crypto.randomUUID(), table_status: 'open', covers: 0, order_type: 'dine-in' }, [activeTable, v4Tables]);
 
   const orderTotal = useMemo(() => currentTable.orders.reduce((s, i) => s + i.price, 0), [currentTable.orders]);
+
+  // VAT CALCULATION (20% Fractional)
+  const vatAmount = useMemo(() => {
+    return currentTable.orders.reduce((acc, item) => {
+      if (item.profile !== 'zero_rated') return acc + (item.price / 6);
+      return acc;
+    }, 0);
+  }, [currentTable.orders]);
 
   useEffect(() => {
     if (currentTable.orders.length === 0 && (!currentTable.covers || currentTable.covers === 0)) setShowCoverModal(true);
     else setShowCoverModal(false);
   }, [activeTable, currentTable.orders.length, currentTable.covers]);
 
-  const persistTable = async (tableId: string, updatedOrders: MenuItem[], updatedCovers: number) => {
+  const persistTable = async (tableId: string, updatedOrders: MenuItem[], updatedCovers: number, updatedType?: 'dine-in' | 'take-away') => {
     isLocalAction.current = true;
-    const payload = { table_number: tableId, orders: updatedOrders, transaction_id: currentTable.transaction_id, table_status: 'open', covers: updatedCovers };
-    setV4Tables(prev => prev.map(t => t.id === tableId ? { ...t, orders: updatedOrders, covers: updatedCovers } : t));
+    const payload = { 
+        table_number: tableId, 
+        orders: updatedOrders, 
+        transaction_id: currentTable.transaction_id, 
+        table_status: 'open', 
+        covers: updatedCovers,
+        order_type: updatedType || currentTable.order_type 
+    };
+    setV4Tables(prev => prev.map(t => t.id === tableId ? { ...t, orders: updatedOrders, covers: updatedCovers, order_type: updatedType || t.order_type } : t));
     await supabase.from('active_tables').upsert(payload, { onConflict: 'table_number' });
     setTimeout(() => { isLocalAction.current = false; }, 1500);
   };
@@ -102,12 +124,13 @@ export default function App() {
     const payMethod = splitPay.atoa > 0 ? 'atoa' : (splitPay.cash > 0 ? 'cash' : 'card');
     const grossVal = orderTotal;
     const mtdMetaData = {
-      items: currentTable.orders, tips: splitPay.tips, build: "v7.5-FINAL-SITE",
+      items: currentTable.orders, tips: splitPay.tips, build: "v8.3-FINAL-LOCK",
+      vat_amount: vatAmount,
       tax_summary: currentTable.orders.reduce((acc, item) => { acc[item.hmrc_tag] = (acc[item.hmrc_tag] || 0) + item.price; return acc; }, {} as any)
     };
     const { error } = await supabase.rpc('settle_and_clear_v3', { 
-      target_table_id: parseInt(activeTable), gross_val: grossVal, vat_val: 0, 
-      pay_method: payMethod, order_type_val: 'dine-in', covers_val: currentTable.covers || 0, meta_data: mtdMetaData
+      target_table_id: parseInt(activeTable), gross_val: grossVal, vat_val: vatAmount, 
+      pay_method: payMethod, order_type_val: currentTable.order_type, covers_val: currentTable.covers || 0, meta_data: mtdMetaData
     });
     if (!error) {
       window.print();
@@ -147,7 +170,9 @@ export default function App() {
             VAT NO: GB 510 239 533<br/>
             238 Haggerston Rd, London E8 4HT
          </div>
-         <div style={{ borderBottom: '1px dashed black', margin: '5px 0' }}>T{activeTable} | {new Date().toLocaleTimeString()}</div>
+         <div style={{ borderBottom: '1px dashed black', margin: '5px 0' }}>
+            T{activeTable} | {currentTable.order_type.toUpperCase()} | {new Date().toLocaleTimeString()}
+         </div>
          
          <table style={{ width: '100%' }}>
             <tbody>
@@ -161,6 +186,10 @@ export default function App() {
                   <td style={{ borderTop: '2px solid black', paddingTop: '8px', fontWeight: 'bold', fontSize: '13pt' }}>TOTAL</td>
                   <td style={{ borderTop: '2px solid black', paddingTop: '8px', fontWeight: 'bold', fontSize: '13pt', textAlign: 'right' }}>£{orderTotal.toFixed(2)}</td>
                </tr>
+               <tr>
+                  <td style={{ fontSize: '8pt', paddingTop: '5px' }}>Includes VAT (20%)</td>
+                  <td style={{ fontSize: '8pt', paddingTop: '5px', textAlign: 'right' }}>£{vatAmount.toFixed(2)}</td>
+               </tr>
             </tbody>
          </table>
 
@@ -172,7 +201,7 @@ export default function App() {
 
       <header style={{ background: '#000', borderBottom: `2px solid ${DOJO_GREEN}`, padding: '10px' }} className="no-print">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}><ShieldCheck size={20} color={DOJO_GREEN} /><span style={{ fontWeight: 'bold' }}>SENTINEL V7.6-EMERGENCY</span></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}><ShieldCheck size={20} color={DOJO_GREEN} /><span style={{ fontWeight: 'bold' }}>SENTINEL V8.3-COMPLIANT</span></div>
           <div style={{ color: DOJO_GREEN, fontWeight: '900' }}>LAST: £{hudStats.lastGold.toFixed(2)} | HOT: {hudStats.hotTables}</div>
         </div>
         <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px' }}>
@@ -183,33 +212,39 @@ export default function App() {
             );
           })}
         </div>
-        <div style={{ display: 'flex', background: '#111', overflowX: 'auto', borderTop: '1px solid #222' }}>
-            {Array.from(new Set(INITIAL_MENU.map(m => m.category))).map(cat => (<button key={cat} onClick={() => setActiveCat(cat)} style={{ padding: '15px 25px', background: activeCat === cat ? DOJO_GREEN : 'transparent', color: activeCat === cat ? '#000' : '#fff', border: 'none', fontWeight: 'bold', fontSize: '12px' }}>{cat}</button>))}
-        </div>
       </header>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', flexGrow: 1, overflow: 'hidden' }} className="no-print">
         <main style={{ padding: '15px', overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px', background: '#0A0A0A' }}>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '10px', marginBottom: '10px' }}>
+             {Array.from(new Set(INITIAL_MENU.map(m => m.category))).map(cat => (<button key={cat} onClick={() => setActiveCat(cat)} style={{ padding: '10px 20px', background: activeCat === cat ? DOJO_GREEN : '#111', color: activeCat === cat ? '#000' : '#fff', border: 'none', fontWeight: 'bold', fontSize: '11px' }}>{cat}</button>))}
+          </div>
           {INITIAL_MENU.filter(m => m.category === activeCat).map(item => (
-            <button key={item.id} onClick={() => { const p = item.id === 'open' ? (parseFloat(prompt("Price:") || "0")) : item.price; persistTable(activeTable, [...currentTable.orders, { ...item, price: p, orderId: crypto.randomUUID() }], currentTable.covers || 0); }} style={{ background: '#1A1A1A', border: '1px solid #333', padding: '20px', textAlign: 'left', minHeight: '110px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', transition: 'transform 0.1s' }}>
-              <div style={{ fontSize: '10px', opacity: 0.5, letterSpacing: '1px' }}>{item.hmrc_tag}</div><div style={{ fontSize: '15px', fontWeight: 'bold' }}>{item.name}</div><div style={{ color: DOJO_GREEN, fontWeight: '900', fontSize: '18px' }}>£{item.price.toFixed(2)}</div>
+            <button key={item.id} onClick={() => { const p = item.id === 'open' ? (parseFloat(prompt("Price:") || "0")) : item.price; persistTable(activeTable, [...currentTable.orders, { ...item, price: p, orderId: crypto.randomUUID() }], currentTable.covers || 0); }} style={{ background: '#1A1A1A', border: '1px solid #333', padding: '20px', textAlign: 'left', minHeight: '110px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: '10px', opacity: 0.5 }}>{item.hmrc_tag}</div><div style={{ fontSize: '15px', fontWeight: 'bold' }}>{item.name}</div><div style={{ color: DOJO_GREEN, fontWeight: '900', fontSize: '18px' }}>£{item.price.toFixed(2)}</div>
             </button>
           ))}
         </main>
 
         <aside style={{ background: '#000', borderLeft: '2px solid #222', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '20px', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontWeight: '900', fontSize: '18px' }}>T{activeTable} ({currentTable.covers || 0} GUESTS)</span>
-            <div style={{ display: 'flex', gap: '20px' }}><Printer size={22} color={DOJO_GREEN} style={{ cursor: 'pointer' }} onClick={() => window.print()} /><Trash2 size={22} color="#ff4444" style={{ cursor: 'pointer' }} onClick={() => window.confirm('VOID TABLE?') && persistTable(activeTable, [], 0)} /></div>
+          <div style={{ padding: '20px', borderBottom: '1px solid #222' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <span style={{ fontWeight: '900', fontSize: '18px' }}>T{activeTable} ({currentTable.covers || 0})</span>
+                <div style={{ display: 'flex', gap: '20px' }}><Printer size={22} color={DOJO_GREEN} style={{ cursor: 'pointer' }} onClick={() => window.print()} /><Trash2 size={22} color="#ff4444" style={{ cursor: 'pointer' }} onClick={() => window.confirm('VOID TABLE?') && persistTable(activeTable, [], 0)} /></div>
+            </div>
+            <div style={{ display: 'flex', gap: '5px' }}>
+                <button onClick={() => persistTable(activeTable, currentTable.orders, currentTable.covers || 0, 'dine-in')} style={{ flex: 1, padding: '12px', background: currentTable.order_type === 'dine-in' ? DOJO_GREEN : '#111', color: currentTable.order_type === 'dine-in' ? '#000' : '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontWeight: 'bold' }}><Utensils size={16}/> EAT IN</button>
+                <button onClick={() => persistTable(activeTable, currentTable.orders, currentTable.covers || 0, 'take-away')} style={{ flex: 1, padding: '12px', background: currentTable.order_type === 'take-away' ? DOJO_GREEN : '#111', color: currentTable.order_type === 'take-away' ? '#000' : '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontWeight: 'bold' }}><ShoppingBag size={16}/> TAKE AWAY</button>
+            </div>
           </div>
           <div style={{ flexGrow: 1, overflowY: 'auto', padding: '15px' }}>
             {currentTable.orders.map((item) => (
-              <div key={item.orderId} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #111' }}><span style={{ fontSize: '14px', fontWeight: '500' }}>1x {item.name}</span><div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}><span style={{ fontWeight: 'bold' }}>£{item.price.toFixed(2)}</span><X size={16} color="#666" style={{ cursor: 'pointer' }} onClick={() => persistTable(activeTable, currentTable.orders.filter(o => o.orderId !== item.orderId), currentTable.covers || 0)} /></div></div>
+              <div key={item.orderId} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #111' }}><span style={{ fontSize: '14px' }}>1x {item.name}</span><div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}><span style={{ fontWeight: 'bold' }}>£{item.price.toFixed(2)}</span><X size={16} color="#666" style={{ cursor: 'pointer' }} onClick={() => persistTable(activeTable, currentTable.orders.filter(o => o.orderId !== item.orderId), currentTable.covers || 0)} /></div></div>
             ))}
           </div>
           <div style={{ padding: '25px', background: '#050505', borderTop: '2px solid #222' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '28px', fontWeight: '900', marginBottom: '25px' }}><span>TOTAL</span><span style={{ color: DOJO_GREEN }}>£{orderTotal.toFixed(2)}</span></div>
-            <button onClick={() => setShowSettle(true)} disabled={currentTable.orders.length === 0} style={{ width: '100%', background: currentTable.orders.length === 0 ? '#333' : DOJO_GREEN, color: '#000', padding: '20px', fontWeight: '900', border: 'none', fontSize: '18px', cursor: 'pointer' }}>SETTLE</button>
+            <button onClick={() => setShowSettle(true)} disabled={currentTable.orders.length === 0} style={{ width: '100%', background: currentTable.orders.length === 0 ? '#333' : DOJO_GREEN, color: '#000', padding: '20px', fontWeight: '900', border: 'none', fontSize: '18px' }}>SETTLE</button>
           </div>
         </aside>
       </div>
@@ -218,26 +253,19 @@ export default function App() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.98)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} className="no-print">
           <div style={{ background: '#111', width: '450px', padding: '40px', border: `2px solid ${DOJO_GREEN}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '30px' }}><span style={{ fontSize: '24px', fontWeight: '900' }}>SETTLE T{activeTable}</span><X size={30} onClick={() => setShowSettle(false)} style={{ cursor: 'pointer' }} /></div>
-            <div style={{ background: '#000', padding: '20px', marginBottom: '25px', border: '1px solid #333' }}>
-               <div style={{ fontSize: '12px', opacity: 0.5, marginBottom: '8px' }}>ADD GRATUITY (OPTIONAL)</div>
-               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                 <span style={{ fontSize: '30px', color: DOJO_GREEN }}>£</span>
-                 <input type="number" placeholder="0.00" onChange={(e) => setSplitPay({...splitPay, tips: parseFloat(e.target.value) || 0})} style={{ width: '100%', background: 'transparent', border: 'none', color: DOJO_GREEN, fontSize: '40px', fontWeight: 'bold', outline: 'none' }} />
-               </div>
-            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '30px' }}>
-               <button onClick={() => setSplitPay({...splitPay, card: 1, cash: 0, atoa: 0})} style={{ background: '#1A1A1A', padding: '25px 10px', border: splitPay.card ? `2px solid ${DOJO_GREEN}` : '1px solid #333', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', color: splitPay.card ? DOJO_GREEN : '#fff' }}><CreditCard /> CARD</button>
-               <button onClick={() => setSplitPay({...splitPay, card: 0, cash: 1, atoa: 0})} style={{ background: '#1A1A1A', padding: '25px 10px', border: splitPay.cash ? `2px solid ${DOJO_GREEN}` : '1px solid #333', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', color: splitPay.cash ? DOJO_GREEN : '#fff' }}><Banknote /> CASH</button>
-               <button onClick={() => setSplitPay({...splitPay, card: 0, cash: 0, atoa: 1})} style={{ background: '#1A1A1A', padding: '25px 10px', border: splitPay.atoa ? `2px solid ${DOJO_GREEN}` : '1px solid #333', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', color: splitPay.atoa ? DOJO_GREEN : '#fff' }}><QrCode /> ATOA</button>
+               <button onClick={() => setSplitPay({...splitPay, card: 1, cash: 0, atoa: 0})} style={{ background: '#1A1A1A', padding: '25px 10px', border: splitPay.card ? `2px solid ${DOJO_GREEN}` : '1px solid #333', color: splitPay.card ? DOJO_GREEN : '#fff' }}><CreditCard /><br/>CARD</button>
+               <button onClick={() => setSplitPay({...splitPay, card: 0, cash: 1, atoa: 0})} style={{ background: '#1A1A1A', padding: '25px 10px', border: splitPay.cash ? `2px solid ${DOJO_GREEN}` : '1px solid #333', color: splitPay.cash ? DOJO_GREEN : '#fff' }}><Banknote /><br/>CASH</button>
+               <button onClick={() => setSplitPay({...splitPay, card: 0, cash: 0, atoa: 1})} style={{ background: '#1A1A1A', padding: '25px 10px', border: splitPay.atoa ? `2px solid ${DOJO_GREEN}` : '1px solid #333', color: splitPay.atoa ? DOJO_GREEN : '#fff' }}><QrCode /><br/>ATOA</button>
             </div>
-            <button onClick={finalize} style={{ width: '100%', background: DOJO_GREEN, color: '#000', padding: '25px', fontWeight: '900', border: 'none', fontSize: '20px', cursor: 'pointer' }}>FINALIZE £{(orderTotal + splitPay.tips).toFixed(2)}</button>
+            <button onClick={finalize} style={{ width: '100%', background: DOJO_GREEN, color: '#000', padding: '25px', fontWeight: '900', border: 'none', fontSize: '20px' }}>FINALIZE £{orderTotal.toFixed(2)}</button>
           </div>
         </div>
       )}
 
       {showCoverModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} className="no-print">
-            <div style={{ textAlign: 'center' }}><div style={{ color: DOJO_GREEN, marginBottom: '40px', fontSize: '28px', fontWeight: '900', letterSpacing: '2px' }}>GUEST COUNT - TABLE {activeTable}</div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px' }}>{[1,2,3,4,5,6,7,8].map(num => (<button key={num} onClick={() => { persistTable(activeTable, [], num); setShowCoverModal(false); }} style={{ height: '100px', width: '100px', background: '#000', border: `2px solid ${DOJO_GREEN}`, color: 'white', fontSize: '30px', fontWeight: '900' }}>{num}</button>))}</div></div>
+            <div style={{ textAlign: 'center' }}><div style={{ color: DOJO_GREEN, marginBottom: '40px', fontSize: '28px', fontWeight: '900' }}>GUESTS - T{activeTable}</div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px' }}>{[1,2,3,4,5,6,7,8].map(num => (<button key={num} onClick={() => { persistTable(activeTable, [], num); setShowCoverModal(false); }} style={{ height: '100px', width: '100px', background: '#000', border: `2px solid ${DOJO_GREEN}`, color: 'white', fontSize: '30px', fontWeight: '900' }}>{num}</button>))}</div></div>
         </div>
       )}
     </div>
