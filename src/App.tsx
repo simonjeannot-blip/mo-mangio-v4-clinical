@@ -125,7 +125,12 @@ export default function App() {
         @media print {
           body * { visibility: hidden !important; }
           #thermal-receipt, #thermal-receipt * { visibility: visible !important; }
-          #thermal-receipt { position: fixed; left: 0; top: 0; width: 72mm; background: white !important; color: black !important; padding: 10px; font-size: 11pt; display: block !important; line-height: 1.2; }
+          #thermal-receipt { 
+            position: fixed; left: 0; top: 0; width: 72mm; 
+            background: white !important; color: black !important; 
+            padding: 10px; font-size: 11pt; display: block !important; 
+            line-height: 1.4; 
+          }
           .no-print { display: none !important; }
         }
         #thermal-receipt { display: none; }
@@ -140,18 +145,31 @@ export default function App() {
          </div>
          <div style={{ borderBottom: '1px dashed black', margin: '5px 0' }}>T{activeTable} | {new Date().toLocaleTimeString()}</div>
          {currentTable.orders.map((item, idx) => (
-           <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-             <span>1x {item.name.toUpperCase()}</span>
-             <span>£{item.price.toFixed(2)}</span>
+           <div key={idx} style={{ clear: 'both', width: '100%', marginBottom: '4px' }}>
+             <span style={{ float: 'left' }}>1x {item.name.toUpperCase()}</span>
+             <span style={{ float: 'right' }}>£{item.price.toFixed(2)}</span>
+             <div style={{ clear: 'both' }}></div>
            </div>
          ))}
-         <div style={{ borderTop: '2px solid black', marginTop: '10px', paddingTop: '5px', display: 'flex', justifyContent: 'space-between', fontWeight: '900', fontSize: '13pt' }}>
-           <span>TOTAL</span>
-           <span>£{orderTotal.toFixed(2)}</span>
+         
+         <div style={{ borderTop: '2px solid black', marginTop: '10px', paddingTop: '5px' }}>
+           <div style={{ float: 'left', fontWeight: 'bold', fontSize: '13pt' }}>TOTAL</div>
+           <div style={{ float: 'right', fontWeight: 'bold', fontSize: '13pt' }}>£{orderTotal.toFixed(2)}</div>
+           <div style={{ clear: 'both' }}></div>
          </div>
-         {splitPay.tips > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#333' }}><span>TIPS</span><span>£{splitPay.tips.toFixed(2)}</span></div>}
-         <div style={{ textAlign: 'center', marginTop: '20px', fontWeight: 'bold' }}>Grazie Mille!</div>
-         <div style={{ height: '30mm' }}></div> {/* Thermal Padding for Cutter */}
+
+         {splitPay.tips > 0 && (
+           <div style={{ clear: 'both', width: '100%', marginTop: '5px' }}>
+             <span style={{ float: 'left' }}>TIPS</span>
+             <span style={{ float: 'right' }}>£{splitPay.tips.toFixed(2)}</span>
+             <div style={{ clear: 'both' }}></div>
+           </div>
+         )}
+
+         <div style={{ textAlign: 'center', marginTop: '25px', fontWeight: 'bold' }}>
+           Grazie Mille!
+           <br/><br/><br/><br/><br/><br/>
+         </div>
       </div>
 
       <header style={{ background: '#000', borderBottom: `2px solid ${DOJO_GREEN}`, padding: '10px' }} className="no-print">
